@@ -11,9 +11,9 @@ import { startScheduler } from '../scheduler/cron';
 
 let lastForecasts: SpotForecast[] | null = null;
 
-// Runtime active spots — starts with all favorites from DEFAULT_SPOTS
+// Runtime active spots — starts with ALL spots from DEFAULT_SPOTS
 const activeSpotIds = new Set<string>(
-  DEFAULT_SPOTS.filter(s => s.favorite).map(s => s.id)
+  DEFAULT_SPOTS.map(s => s.id)
 );
 
 export function getActiveSpots(): Spot[] {
