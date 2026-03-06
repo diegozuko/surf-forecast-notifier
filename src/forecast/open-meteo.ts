@@ -11,6 +11,9 @@ import { Spot, HourlyForecast, SpotForecast } from '../config/types';
 
 const MARINE_BASE = 'https://marine-api.open-meteo.com/v1/marine';
 const WEATHER_BASE = 'https://api.open-meteo.com/v1/forecast';
+const FETCH_TIMEOUT_MS = 15_000; // 15 second timeout
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 2_000; // 2 seconds between retries
 
 interface MarineResponse {
   hourly: {
@@ -45,6 +48,45 @@ export async function fetchSpotForecast(spot: Spot): Promise<SpotForecast> {
   };
 }
 
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchWithRetry<T>(
+  label: string,
+  url: string,
+  parse: (res: Response) => Promise<T>,
+): Promise<T> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.log(`[Forecast] Retrying ${label} (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`);
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * attempt));
+      }
+      const res = await fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+      if (!res.ok) {
+        throw new Error(`${label} error: ${res.status} ${res.statusText}`);
+      }
+      return await parse(res);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (lastError.name === 'AbortError') {
+        lastError = new Error(`${label} timeout after ${FETCH_TIMEOUT_MS / 1000}s`);
+      }
+      console.error(`[Forecast] ${label} attempt ${attempt + 1} failed:`, lastError.message);
+    }
+  }
+  throw lastError!;
+}
+
 async function fetchMarine(lat: number, lon: number): Promise<MarineResponse> {
   const params = new URLSearchParams({
     latitude: lat.toString(),
@@ -55,13 +97,7 @@ async function fetchMarine(lat: number, lon: number): Promise<MarineResponse> {
   });
 
   const url = `${MARINE_BASE}?${params}`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Marine API error: ${res.status} ${res.statusText}`);
-  }
-
-  return res.json() as Promise<MarineResponse>;
+  return fetchWithRetry('Marine API', url, res => res.json() as Promise<MarineResponse>);
 }
 
 async function fetchWeather(lat: number, lon: number): Promise<WeatherResponse> {
@@ -75,13 +111,7 @@ async function fetchWeather(lat: number, lon: number): Promise<WeatherResponse> 
   });
 
   const url = `${WEATHER_BASE}?${params}`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Weather API error: ${res.status} ${res.statusText}`);
-  }
-
-  return res.json() as Promise<WeatherResponse>;
+  return fetchWithRetry('Weather API', url, res => res.json() as Promise<WeatherResponse>);
 }
 
 function mergeForecasts(marine: MarineResponse, weather: WeatherResponse): HourlyForecast[] {
