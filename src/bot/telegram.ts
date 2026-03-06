@@ -11,6 +11,19 @@ import { startScheduler } from '../scheduler/cron';
 
 let lastForecasts: SpotForecast[] | null = null;
 
+// Runtime active spots — starts with all favorites from DEFAULT_SPOTS
+const activeSpotIds = new Set<string>(
+  DEFAULT_SPOTS.filter(s => s.favorite).map(s => s.id)
+);
+
+export function getActiveSpots(): Spot[] {
+  return DEFAULT_SPOTS.filter(s => activeSpotIds.has(s.id));
+}
+
+function getInactiveSpots(): Spot[] {
+  return DEFAULT_SPOTS.filter(s => !activeSpotIds.has(s.id));
+}
+
 export function createBot(config: EnvConfig): TelegramBot {
   const bot = new TelegramBot(config.telegramBotToken, { polling: true });
 
@@ -21,7 +34,9 @@ export function createBot(config: EnvConfig): TelegramBot {
       '',
       'Comandos disponibles:',
       '/forecast – Generar forecast ahora',
-      '/spots – Ver spots configurados',
+      '/spots – Ver spots activos',
+      '/addspot – Agregar un spot',
+      '/removespot – Quitar un spot',
       '/settime HH:MM – Cambiar hora del reporte diario',
       '/toggleanimation on|off – Activar/desactivar animación',
       '',
@@ -34,15 +49,84 @@ export function createBot(config: EnvConfig): TelegramBot {
     await runForecast(bot, chatId, config);
   });
 
-  bot.onText(/\/spots/, (msg) => {
+  bot.onText(/\/spots$/, (msg) => {
     const chatId = msg.chat.id;
-    const lines = DEFAULT_SPOTS.map(s => {
-      const fav = s.favorite ? '❤️' : '  ';
-      return `${fav} *${s.name}* (${s.type})\n   📍 ${s.lat}, ${s.lon}\n   🌊 ${s.limits.minWave}–${s.limits.maxWave}m | 💨 max ${s.limits.maxWind}km/h`;
+    const active = getActiveSpots();
+    if (active.length === 0) {
+      bot.sendMessage(chatId, '📍 No hay spots activos. Usá /addspot para agregar uno.');
+      return;
+    }
+    const lines = active.map(s => {
+      return `📍 *${s.name}* (${s.type})\n   🌊 ${s.limits.minWave}–${s.limits.maxWave}m | 💨 max ${s.limits.maxWind}km/h`;
     });
-    bot.sendMessage(chatId, `📍 *Spots configurados:*\n\n${lines.join('\n\n')}`, {
+    bot.sendMessage(chatId, `📍 *Spots activos (${active.length}):*\n\n${lines.join('\n\n')}`, {
       parse_mode: 'Markdown',
     });
+  });
+
+  bot.onText(/\/addspot/, (msg) => {
+    const chatId = msg.chat.id;
+    const inactive = getInactiveSpots();
+    if (inactive.length === 0) {
+      bot.sendMessage(chatId, '✅ Todos los spots ya están activos.');
+      return;
+    }
+    bot.sendMessage(chatId, '➕ Elegí un spot para agregar:', {
+      reply_markup: {
+        inline_keyboard: inactive.map(s => ([{
+          text: s.name,
+          callback_data: `add_spot:${s.id}`,
+        }])),
+      },
+    });
+  });
+
+  bot.onText(/\/removespot/, (msg) => {
+    const chatId = msg.chat.id;
+    const active = getActiveSpots();
+    if (active.length === 0) {
+      bot.sendMessage(chatId, '📭 No hay spots activos para quitar.');
+      return;
+    }
+    bot.sendMessage(chatId, '➖ Elegí un spot para quitar:', {
+      reply_markup: {
+        inline_keyboard: active.map(s => ([{
+          text: s.name,
+          callback_data: `remove_spot:${s.id}`,
+        }])),
+      },
+    });
+  });
+
+  bot.on('callback_query', (query) => {
+    const data = query.data;
+    if (!data) return;
+
+    if (data.startsWith('add_spot:')) {
+      const spotId = data.replace('add_spot:', '');
+      const spot = DEFAULT_SPOTS.find(s => s.id === spotId);
+      if (spot) {
+        activeSpotIds.add(spotId);
+        bot.answerCallbackQuery(query.id, { text: `${spot.name} agregado` });
+        bot.editMessageText(`✅ *${spot.name}* agregado a los spots activos.`, {
+          chat_id: query.message?.chat.id,
+          message_id: query.message?.message_id,
+          parse_mode: 'Markdown',
+        });
+      }
+    } else if (data.startsWith('remove_spot:')) {
+      const spotId = data.replace('remove_spot:', '');
+      const spot = DEFAULT_SPOTS.find(s => s.id === spotId);
+      if (spot) {
+        activeSpotIds.delete(spotId);
+        bot.answerCallbackQuery(query.id, { text: `${spot.name} quitado` });
+        bot.editMessageText(`❌ *${spot.name}* quitado de los spots activos.`, {
+          chat_id: query.message?.chat.id,
+          message_id: query.message?.message_id,
+          parse_mode: 'Markdown',
+        });
+      }
+    }
   });
 
   bot.onText(/\/settime (.+)/, (msg, match) => {
@@ -85,22 +169,28 @@ export async function runForecast(
   try {
     await bot.sendMessage(chatId, '⏳ Generando forecast...');
 
-    // Fetch forecasts
+    // Fetch forecasts for active spots only
+    const spots = getActiveSpots();
+    if (spots.length === 0) {
+      await bot.sendMessage(chatId, '📭 No hay spots activos. Usá /addspot para agregar uno.');
+      return;
+    }
+
     let forecasts: SpotForecast[];
 
     if (config.demoMode) {
       console.log('[Forecast] Using demo fixtures');
-      forecasts = getDemoForecasts();
+      forecasts = getDemoForecasts().filter(f => activeSpotIds.has(f.spot.id));
     } else {
       console.log('[Forecast] Fetching real data from Open-Meteo...');
       try {
         forecasts = await Promise.all(
-          DEFAULT_SPOTS.map(spot => fetchSpotForecast(spot))
+          spots.map(spot => fetchSpotForecast(spot))
         );
       } catch (err) {
         console.error('[Forecast] API error, falling back to cache:', err);
         if (lastForecasts) {
-          forecasts = lastForecasts;
+          forecasts = lastForecasts.filter(f => activeSpotIds.has(f.spot.id));
           await bot.sendMessage(chatId, '⚠️ Error al obtener datos frescos. Usando último forecast cacheado.');
         } else {
           throw err;
