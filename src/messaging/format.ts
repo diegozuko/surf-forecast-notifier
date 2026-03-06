@@ -1,7 +1,8 @@
-import { DailyReport, SpotRecommendation, TimeWindow } from '../config/types';
+import { DailyReport } from '../config/types';
 
 /**
- * Format the daily report as a rich Telegram message (MarkdownV2-safe).
+ * Format the daily report as a concise Telegram message (MarkdownV2-safe).
+ * Only shows the recommended spot and one alternative – no per-hour tables.
  */
 export function formatTelegramMessage(report: DailyReport): string {
   const lines: string[] = [];
@@ -15,61 +16,47 @@ export function formatTelegramMessage(report: DailyReport): string {
   lines.push(escMd(report.overallSummary.replace(/\*\*/g, '')));
   lines.push('');
 
-  // Per-spot details
-  for (const rec of report.recommendations) {
-    const isBest = rec === report.bestSpot;
-    const isAlt = rec === report.alternativeSpot;
-    const label = isBest ? '⭐ RECOMENDADO' : isAlt ? '🔄 ALTERNATIVA' : '';
-    const fav = rec.spot.favorite ? '❤️' : '';
-
-    lines.push(`━━━━━━━━━━━━━━━━━━`);
-    lines.push(`📍 *${escMd(rec.spot.name)}* ${fav} ${label}`);
-    lines.push(`🎯 Confidence: ${rec.confidence}/100 – ${escMd(rec.confidenceReason)}`);
+  // Best spot summary
+  const best = report.bestSpot;
+  if (best && best.bestWindows.length > 0) {
+    const bw = best.bestWindows[0];
+    const peak = bw.hours.reduce((a, b) => a.score > b.score ? a : b, bw.hours[0]);
+    const fav = best.spot.favorite ? ' ❤️' : '';
+    lines.push(`⭐ *${escMd(best.spot.name)}*${fav}`);
+    lines.push(`🎯 Confianza: ${best.confidence}/100`);
+    lines.push(`🕐 Ventana: ${escMd(bw.startHour)}–${escMd(bw.endHour)}`);
+    lines.push(`🌊 Ola: ${peak.hour.waveHeight.toFixed(1)}m · Per: ${peak.hour.wavePeriod.toFixed(0)}s`);
+    lines.push(`💨 Viento: ${peak.hour.windSpeed.toFixed(0)}km/h ${degreesToCompass(peak.hour.windDirection)}`);
     lines.push('');
-
-    if (rec.bestWindows.length > 0) {
-      for (let i = 0; i < rec.bestWindows.length; i++) {
-        const w = rec.bestWindows[i];
-        lines.push(`🕐 *Ventana ${i + 1}: ${escMd(w.startHour)}–${escMd(w.endHour)}* \\(avg score: ${w.avgScore}\\)`);
-        lines.push(formatWindowTable(w));
-        lines.push('');
-      }
-    } else {
-      lines.push(`❌ Sin ventana surfeable`);
-      lines.push('');
-    }
   }
 
-  // Analysis bullets
-  lines.push(`━━━━━━━━━━━━━━━━━━`);
-  lines.push('📊 *Análisis:*');
+  // Alternative spot summary
+  const alt = report.alternativeSpot;
+  if (alt && alt.bestWindows.length > 0) {
+    const aw = alt.bestWindows[0];
+    const peakAlt = aw.hours.reduce((a, b) => a.score > b.score ? a : b, aw.hours[0]);
+    const fav = alt.spot.favorite ? ' ❤️' : '';
+    lines.push(`🔄 *Alternativa: ${escMd(alt.spot.name)}*${fav}`);
+    lines.push(`🎯 Confianza: ${alt.confidence}/100`);
+    lines.push(`🕐 Ventana: ${escMd(aw.startHour)}–${escMd(aw.endHour)}`);
+    lines.push(`🌊 Ola: ${peakAlt.hour.waveHeight.toFixed(1)}m · Per: ${peakAlt.hour.wavePeriod.toFixed(0)}s`);
+    lines.push(`💨 Viento: ${peakAlt.hour.windSpeed.toFixed(0)}km/h ${degreesToCompass(peakAlt.hour.windDirection)}`);
+    lines.push('');
+  }
+
+  // Brief analysis
   const bullets = generateAnalysisBullets(report);
-  for (const b of bullets) {
-    lines.push(`• ${escMd(b)}`);
+  if (bullets.length > 0) {
+    lines.push('📊 *Análisis:*');
+    for (const b of bullets) {
+      lines.push(`• ${escMd(b)}`);
+    }
+    lines.push('');
   }
 
-  lines.push('');
   lines.push('_Generado automáticamente – Surf Forecast Notifier_');
 
   return lines.join('\n');
-}
-
-function formatWindowTable(w: TimeWindow): string {
-  const rows: string[] = [];
-  rows.push('```');
-  rows.push('Hora  | Ola(m) | Per(s) | Viento   | Dir');
-  rows.push('------|--------|--------|----------|----');
-
-  for (const sh of w.hours) {
-    const h = sh.hour;
-    const windDir = degreesToCompass(h.windDirection);
-    rows.push(
-      `${h.localHour} | ${h.waveHeight.toFixed(1).padStart(5)}  | ${h.wavePeriod.toFixed(0).padStart(5)}  | ${h.windSpeed.toFixed(0).padStart(3)}km/h ${windDir.padStart(3)} | ${degreesToCompass(h.swellDirection)}`
-    );
-  }
-
-  rows.push('```');
-  return rows.join('\n');
 }
 
 function generateAnalysisBullets(report: DailyReport): string[] {
@@ -159,19 +146,33 @@ export function formatPlainText(report: DailyReport): string {
   lines.push(report.overallSummary);
   lines.push('');
 
-  for (const rec of report.recommendations) {
-    lines.push(`--- ${rec.spot.name} ---`);
-    lines.push(`Confidence: ${rec.confidence}/100 – ${rec.confidenceReason}`);
-    if (rec.bestWindows.length > 0) {
-      for (const w of rec.bestWindows) {
-        lines.push(`  Ventana: ${w.startHour}–${w.endHour} (avg: ${w.avgScore}, peak: ${w.peakScore})`);
-        for (const sh of w.hours) {
-          const h = sh.hour;
-          lines.push(`    ${h.localHour} | Ola ${h.waveHeight.toFixed(1)}m | Per ${h.wavePeriod.toFixed(0)}s | Viento ${h.windSpeed.toFixed(0)}km/h ${degreesToCompass(h.windDirection)} | Score ${sh.score}`);
-        }
-      }
-    } else {
-      lines.push('  Sin ventana surfeable');
+  const best = report.bestSpot;
+  if (best && best.bestWindows.length > 0) {
+    const bw = best.bestWindows[0];
+    const peak = bw.hours.reduce((a, b) => a.score > b.score ? a : b, bw.hours[0]);
+    lines.push(`⭐ ${best.spot.name}`);
+    lines.push(`  Confianza: ${best.confidence}/100`);
+    lines.push(`  Ventana: ${bw.startHour}–${bw.endHour}`);
+    lines.push(`  Ola: ${peak.hour.waveHeight.toFixed(1)}m | Per: ${peak.hour.wavePeriod.toFixed(0)}s | Viento: ${peak.hour.windSpeed.toFixed(0)}km/h ${degreesToCompass(peak.hour.windDirection)}`);
+    lines.push('');
+  }
+
+  const alt = report.alternativeSpot;
+  if (alt && alt.bestWindows.length > 0) {
+    const aw = alt.bestWindows[0];
+    const peakAlt = aw.hours.reduce((a, b) => a.score > b.score ? a : b, aw.hours[0]);
+    lines.push(`🔄 Alternativa: ${alt.spot.name}`);
+    lines.push(`  Confianza: ${alt.confidence}/100`);
+    lines.push(`  Ventana: ${aw.startHour}–${aw.endHour}`);
+    lines.push(`  Ola: ${peakAlt.hour.waveHeight.toFixed(1)}m | Per: ${peakAlt.hour.wavePeriod.toFixed(0)}s | Viento: ${peakAlt.hour.windSpeed.toFixed(0)}km/h ${degreesToCompass(peakAlt.hour.windDirection)}`);
+    lines.push('');
+  }
+
+  const bullets = generateAnalysisBullets(report);
+  if (bullets.length > 0) {
+    lines.push('Análisis:');
+    for (const b of bullets) {
+      lines.push(`  • ${b}`);
     }
     lines.push('');
   }

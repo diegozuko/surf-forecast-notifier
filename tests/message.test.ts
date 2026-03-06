@@ -11,11 +11,14 @@ describe('formatPlainText', () => {
 
     // Snapshot-style assertions
     expect(text).toContain('SURF FORECAST');
-    expect(text).toContain('Playa Brava');
-    expect(text).toContain('La Barra');
-    expect(text).toContain('José Ignacio');
-    expect(text).toContain('Confidence');
+    expect(text).toContain('Confianza');
     expect(text).toContain('Ventana');
+    // Should contain best spot and alternative
+    expect(report.bestSpot).toBeTruthy();
+    expect(text).toContain(report.bestSpot!.spot.name);
+    if (report.alternativeSpot) {
+      expect(text).toContain(report.alternativeSpot.spot.name);
+    }
   });
 
   it('should contain wave and wind data', () => {
@@ -23,11 +26,11 @@ describe('formatPlainText', () => {
     const report = generateDailyReport(forecasts);
     const text = formatPlainText(report);
 
-    // Should have hour entries with data
-    expect(text).toMatch(/\d{2}:00/);           // Hour format
-    expect(text).toMatch(/Ola \d+\.\d+m/);      // Wave height
-    expect(text).toMatch(/Viento \d+km\/h/);     // Wind speed
-    expect(text).toMatch(/Per \d+s/);            // Period
+    // Should have summary data in the concise format
+    expect(text).toMatch(/\d{2}:\d{2}/);            // Time format
+    expect(text).toMatch(/Ola: \d+\.\d+m/);         // Wave height
+    expect(text).toMatch(/Viento: \d+km\/h/);       // Wind speed
+    expect(text).toMatch(/Per: \d+s/);              // Period
   });
 });
 
@@ -38,9 +41,20 @@ describe('formatTelegramMessage', () => {
     const msg = formatTelegramMessage(report);
 
     expect(msg).toContain('SURF FORECAST');
-    expect(msg).toContain('Playa Brava');
-    expect(msg).toContain('Confidence');
+    expect(msg).toContain('Confianza');
     expect(msg).toContain('Análisis');
+    // Should contain best spot
+    expect(report.bestSpot).toBeTruthy();
+    expect(msg).toContain(report.bestSpot!.spot.name);
+  });
+
+  it('should be under Telegram message limit', () => {
+    const forecasts = getDemoForecasts();
+    const report = generateDailyReport(forecasts);
+    const msg = formatTelegramMessage(report);
+
+    // Telegram limit is 4096 characters
+    expect(msg.length).toBeLessThan(4096);
   });
 });
 
