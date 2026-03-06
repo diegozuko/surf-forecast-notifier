@@ -7,6 +7,7 @@ import { generateDailyReport } from '../scoring/report';
 import { formatTelegramMessage } from '../messaging/format';
 import { generateForecastChart } from '../imaging/chart';
 import { getDemoForecasts } from '../demo';
+import { startScheduler } from '../scheduler/cron';
 
 let lastForecasts: SpotForecast[] | null = null;
 
@@ -49,7 +50,8 @@ export function createBot(config: EnvConfig): TelegramBot {
     const time = match?.[1]?.trim();
     if (time && /^\d{2}:\d{2}$/.test(time)) {
       config.scheduleTime = time;
-      bot.sendMessage(chatId, `⏰ Hora del reporte cambiada a *${time}*`, { parse_mode: 'Markdown' });
+      startScheduler(bot, config);
+      bot.sendMessage(chatId, `⏰ Hora del reporte cambiada a *${time}* y scheduler reiniciado`, { parse_mode: 'Markdown' });
     } else {
       bot.sendMessage(chatId, '❌ Formato inválido. Usá /settime HH:MM (ej: /settime 21:00)');
     }

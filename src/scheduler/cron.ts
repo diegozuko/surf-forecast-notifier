@@ -3,11 +3,19 @@ import TelegramBot from 'node-telegram-bot-api';
 import { EnvConfig } from '../config/env';
 import { sendScheduledForecast } from '../bot/telegram';
 
+let activeTask: cron.ScheduledTask | null = null;
+
 /**
- * Start the daily cron job.
+ * Start (or restart) the daily cron job.
  * Default: 21:30 America/Montevideo.
  */
 export function startScheduler(bot: TelegramBot, config: EnvConfig): cron.ScheduledTask {
+  // Stop existing task if restarting (e.g. after /settime)
+  if (activeTask) {
+    activeTask.stop();
+    console.log('[Scheduler] Stopped previous schedule');
+  }
+
   const [hours, minutes] = config.scheduleTime.split(':').map(Number);
 
   // Cron format: minute hour * * *
@@ -26,5 +34,6 @@ export function startScheduler(bot: TelegramBot, config: EnvConfig): cron.Schedu
     timezone: config.timezone,
   });
 
+  activeTask = task;
   return task;
 }
