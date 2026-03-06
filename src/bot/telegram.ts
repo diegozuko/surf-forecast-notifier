@@ -234,7 +234,16 @@ export async function runForecast(
     console.log('[Forecast] Report sent successfully');
   } catch (err) {
     console.error('[Forecast] Error generating report:', err);
-    await bot.sendMessage(chatId, '❌ Error generando el forecast. Revisá los logs.');
+    const errMsg = err instanceof Error ? err.message : String(err);
+    let userMessage = '❌ Error generando el forecast.\n\n';
+    if (errMsg.includes('fetch failed') || errMsg.includes('EAI_AGAIN') || errMsg.includes('ENOTFOUND') || errMsg.includes('timeout')) {
+      userMessage += '🌐 No se pudo conectar con el servicio de pronóstico (Open-Meteo). Verificá tu conexión a internet e intentá de nuevo en unos minutos.';
+    } else if (errMsg.includes('API error')) {
+      userMessage += `⚠️ El servicio de pronóstico respondió con error: ${errMsg}`;
+    } else {
+      userMessage += `Detalle: ${errMsg}`;
+    }
+    await bot.sendMessage(chatId, userMessage);
   }
 }
 

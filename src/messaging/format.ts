@@ -30,7 +30,7 @@ export function formatTelegramMessage(report: DailyReport): string {
     if (rec.bestWindows.length > 0) {
       for (let i = 0; i < rec.bestWindows.length; i++) {
         const w = rec.bestWindows[i];
-        lines.push(`🕐 *Ventana ${i + 1}: ${escMd(w.startHour)}–${escMd(w.endHour)}* (avg score: ${w.avgScore})`);
+        lines.push(`🕐 *Ventana ${i + 1}: ${escMd(w.startHour)}–${escMd(w.endHour)}* \\(avg score: ${w.avgScore}\\)`);
         lines.push(formatWindowTable(w));
         lines.push('');
       }
