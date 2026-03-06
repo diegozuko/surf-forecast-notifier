@@ -1,17 +1,20 @@
+import * as SunCalc from 'suncalc';
 import { SpotForecast, DailyReport, SpotRecommendation } from '../config/types';
 import { generateSpotRecommendation } from './score';
 
 /**
- * Filter forecast hours to a relevant time range.
- * - If called in the evening (after 18:00): show tomorrow's hours only
- * - Otherwise: show remaining hours from now onward (today + tomorrow)
+ * Filter forecast hours to a relevant time range, keeping only daylight hours
+ * (sunrise to sunset). You can't surf at night.
+ *
+ * - If called in the evening (after 18:00): show tomorrow's daylight hours only
+ * - Otherwise: show remaining daylight hours from now onward
  */
 function filterRelevantHours(forecasts: SpotForecast[]): SpotForecast[] {
   const now = new Date();
   const currentHour = now.getHours();
 
   if (currentHour >= 18) {
-    // Evening scheduled report: filter to tomorrow only
+    // Evening scheduled report: filter to tomorrow daylight only
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(0, 0, 0, 0);
@@ -20,15 +23,30 @@ function filterRelevantHours(forecasts: SpotForecast[]): SpotForecast[] {
 
     return forecasts.map(f => ({
       ...f,
-      hourly: f.hourly.filter(h => h.time >= tomorrow && h.time < dayAfter),
+      hourly: f.hourly.filter(h => {
+        if (h.time < tomorrow || h.time >= dayAfter) return false;
+        return isDaylightHour(h.time, f.spot.lat, f.spot.lon);
+      }),
     }));
   }
 
-  // Manual/daytime report: show hours from now onward
+  // Manual/daytime report: show daylight hours from now onward
   return forecasts.map(f => ({
     ...f,
-    hourly: f.hourly.filter(h => h.time >= now),
+    hourly: f.hourly.filter(h => {
+      if (h.time < now) return false;
+      return isDaylightHour(h.time, f.spot.lat, f.spot.lon);
+    }),
   }));
+}
+
+/**
+ * Check if a given hour falls between sunrise and sunset at the given coordinates.
+ */
+function isDaylightHour(time: Date, lat: number, lon: number): boolean {
+  const sunTimes = SunCalc.getTimes(time, lat, lon);
+  const ms = time.getTime();
+  return ms >= sunTimes.sunrise.getTime() && ms <= sunTimes.sunset.getTime();
 }
 
 /**
