@@ -61,14 +61,15 @@ export function generateDailyReport(forecasts: SpotForecast[]): DailyReport {
     (a, b) => (b.confidence * b.topScore) - (a.confidence * a.topScore)
   );
 
-  const bestSpot = ranked[0] ?? null;
+  // Only consider spots with decent conditions (confidence >= 40, has windows)
+  const viable = ranked.filter(r => r.bestWindows.length > 0 && r.confidence >= 40);
+  const bestSpot = viable[0] ?? null;
 
   // Find best alternative (different spot, preferring non-favorite)
   let alternativeSpot: SpotRecommendation | null = null;
-  if (ranked.length > 1) {
-    // Prefer a non-favorite alternative if available with decent score
-    const nonFavAlt = ranked.find(r => r !== bestSpot && !r.spot.favorite && r.topScore > 30);
-    alternativeSpot = nonFavAlt ?? ranked.find(r => r !== bestSpot) ?? null;
+  if (viable.length > 1) {
+    const nonFavAlt = viable.find(r => r !== bestSpot && !r.spot.favorite && r.confidence >= 35);
+    alternativeSpot = nonFavAlt ?? viable.find(r => r !== bestSpot) ?? null;
   }
 
   const dateStr = new Date().toLocaleDateString('es-UY', {
@@ -85,15 +86,23 @@ export function generateDailyReport(forecasts: SpotForecast[]): DailyReport {
 
   // Build overall summary
   let overallSummary = '';
-  if (bestSpot && bestSpot.bestWindows.length > 0) {
+  if (bestSpot) {
     overallSummary = `🏄 ${timeRef} el mejor spot es **${bestSpot.spot.name}**. `;
     overallSummary += bestSpot.summary;
-    if (alternativeSpot && alternativeSpot.bestWindows.length > 0) {
+    if (alternativeSpot) {
       overallSummary += `\n\nAlternativa: **${alternativeSpot.spot.name}** – ${alternativeSpot.summary}`;
     }
   } else {
-    overallSummary = `😔 ${timeRef} no hay condiciones ideales para longboard en los spots monitoreados. `;
-    overallSummary += 'Mantenete atento, las condiciones pueden cambiar.';
+    // No viable spots – be honest about bad conditions
+    const topRanked = ranked[0];
+    if (topRanked && topRanked.bestWindows.length > 0) {
+      overallSummary = `🚫 ${timeRef} las condiciones son malas para longboard. `;
+      overallSummary += `El mejor spot sería ${topRanked.spot.name} pero con confianza muy baja (${topRanked.confidence}/100). `;
+      overallSummary += 'No parece haber surf mañana – mejor esperar.';
+    } else {
+      overallSummary = `🚫 ${timeRef} no hay surf. Condiciones pobres en todos los spots monitoreados. `;
+      overallSummary += 'Mucho viento, poco swell, o ambos. Mejor esperar al próximo día.';
+    }
   }
 
   return {
