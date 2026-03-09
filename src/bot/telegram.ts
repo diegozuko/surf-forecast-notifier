@@ -46,6 +46,11 @@ export function createBot(config: EnvConfig): TelegramBot {
 
   bot.onText(/\/forecast/, async (msg) => {
     const chatId = msg.chat.id;
+    // Auto-save chat ID for scheduled reports if not configured
+    if (!config.telegramChatId) {
+      config.telegramChatId = String(chatId);
+      console.log(`[Bot] Auto-saved TELEGRAM_CHAT_ID: ${chatId} (set in .env to persist)`);
+    }
     await runForecast(bot, chatId, config);
   });
 
@@ -220,7 +225,7 @@ export async function runForecast(
       await bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
     } catch {
       // Fallback: send without markdown if parsing fails
-      const plain = message.replace(/[\\*_`\[\]()~>#+=|{}.!-]/g, '');
+      const plain = message.replace(/[\\*_`\[\]()~>#+=|{}!-]/g, '');
       await bot.sendMessage(chatId, plain);
     }
 
@@ -253,8 +258,9 @@ export async function runForecast(
 export async function sendScheduledForecast(bot: TelegramBot, config: EnvConfig): Promise<void> {
   const chatId = config.telegramChatId;
   if (!chatId) {
-    console.error('[Scheduler] No TELEGRAM_CHAT_ID configured');
+    console.error('[Scheduler] No TELEGRAM_CHAT_ID configured – skipping scheduled report. Set TELEGRAM_CHAT_ID in .env');
     return;
   }
+  console.log(`[Scheduler] Sending scheduled forecast to chat ${chatId}...`);
   await runForecast(bot, chatId, config);
 }
